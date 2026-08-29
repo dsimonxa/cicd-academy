@@ -1,0 +1,23 @@
+name: 'Setup Java build environment'
+description: >
+  Paso reutilizable: configura el JDK 21 y habilita la caché de dependencias
+  Maven. Se invoca desde cada etapa del pipeline (build, test, deploy) para
+  no repetir configuración y garantizar que todas las etapas usan exactamente
+  el mismo entorno de ejecución.
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up JDK 21 (Temurin)
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '21'
+        cache: maven
+
+    - name: Mostrar versiones de herramientas
+      shell: bash
+      run: |
+        echo "== Entorno de build =="
+        java -version
+        mvn -version

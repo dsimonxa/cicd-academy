@@ -1,0 +1,115 @@
+name: CI/CD Pipeline
+
+# Trigger: se ejecuta automáticamente en cada push a la rama principal.
+on:
+  push:
+    branches: [ main ]
+  # Permite también lanzarlo manualmente desde la pestaña Actions (útil para
+  # generar capturas de evidencia sin necesidad de un nuevo commit).
+  workflow_dispatch:
+
+# Evita ejecuciones duplicadas/solapadas para el mismo ref.
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JAR_NAME: demo-lambda.jar
+
+jobs:
+  # -----------------------------------------------------------------------
+  # Etapa 1: BUILD - compila el código y genera el artefacto (fat-jar)
+  # -----------------------------------------------------------------------
+  build:
+    name: 🔨 Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar entorno Java (paso reutilizable)
+        uses: ./.github/actions/setup-java-env
+
+      - name: Compilar el proyecto
+        run: mvn -B compile
+
+      - name: Empaquetar (fat-jar con maven-shade-plugin)
+        run: mvn -B package -DskipTests
+
+      - name: Publicar artefacto de build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.JAR_NAME }}
+          path: target/${{ env.JAR_NAME }}
+          retention-days: 7
+
+  # -----------------------------------------------------------------------
+  # Etapa 2: TEST - ejecuta los tests unitarios sobre el código compilado
+  # -----------------------------------------------------------------------
+  test:
+    name: ✅ Test
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar entorno Java (paso reutilizable)
+        uses: ./.github/actions/setup-java-env
+
+      - name: Ejecutar tests unitarios (JUnit 5)
+        run: mvn -B test
+
+      - name: Publicar informe de resultados de tests
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports
+          retention-days: 7
+
+  # -----------------------------------------------------------------------
+  # Etapa 3: DEPLOY - recoge el artefacto validado y simula su despliegue
+  # (empaquetado final + validaciones de integridad). No requiere
+  # credenciales reales de AWS: pensado para un entorno académico/demo.
+  # -----------------------------------------------------------------------
+  deploy:
+    name: 🚀 Deploy
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar artefacto generado en build
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.JAR_NAME }}
+          path: target
+
+      - name: Validar integridad del artefacto
+        run: |
+          echo "== Validando artefacto antes de desplegar =="
+          test -f "target/${{ env.JAR_NAME }}"
+          unzip -l "target/${{ env.JAR_NAME }}" | grep HelloLambdaHandler.class
+          echo "Artefacto válido: target/${{ env.JAR_NAME }}"
+
+      - name: Desplegar (simulado)
+        run: |
+          echo "== Iniciando despliegue simulado =="
+          echo "Función objetivo : demo-lambda"
+          echo "Handler          : com.example.demo.lambda.HelloLambdaHandler::handleRequest"
+          echo "Runtime          : java21"
+          echo "Artefacto        : ${{ env.JAR_NAME }} ($(du -h target/${{ env.JAR_NAME }} | cut -f1))"
+          echo "----------------------------------------------------"
+          echo "Simulando 'aws lambda update-function-code'..."
+          sleep 2
+          echo "✅ Despliegue simulado completado correctamente."
+          echo ""
+          echo "Nota: para desplegar de verdad en AWS, sustituir este paso por"
+          echo "'aws-actions/configure-aws-credentials' + 'aws lambda update-function-code'"
+          echo "usando credenciales guardadas como GitHub Secrets."
+
+      - name: Publicar paquete final de despliegue
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-package
+          path: target/${{ env.JAR_NAME }}
+          retention-days: 30
